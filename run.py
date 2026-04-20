@@ -31,11 +31,10 @@ def main():
         
         while True:
             check_state = client.get_state()
-            if check_state is None:
-                continue
-                
+            
             timeout_ticks += 1
-            if timeout_ticks > 150:
+            print(f"Waiting for state change... (tick {timeout_ticks})")
+            if timeout_ticks > 15:
                 combat_ai.action_queue.clear()
                 break
             
