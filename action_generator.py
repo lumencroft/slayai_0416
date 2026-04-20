@@ -1,7 +1,9 @@
 import re
 from sts_cards import CARD_DB
+from sts_status import STATUS_DB
 
-def generate_all_actions(energy, hand, enemies):
+
+def generate_all_actions(energy, hand, enemies, player_status=None):
     combos = []
     enemy_count = len(enemies) if enemies else 1 
     
@@ -13,7 +15,7 @@ def generate_all_actions(energy, hand, enemies):
             e = enemies[i]
             hp = e.get("hp", 999)
             if hp <= 0:
-                enemy_data[i] = {"hp": 0, "inc_dmg": 0, "init_vuln": 0}
+                enemy_data[i] = {"hp": 0, "inc_dmg": 0, "init_vuln": 0, "name": e.get("name", "")}
                 continue
                 
             alive_targets.append(i)
@@ -36,12 +38,30 @@ def generate_all_actions(energy, hand, enemies):
                         nums = re.findall(r'\d+', label)
                         if nums: inc_dmg += int(nums[0])
                         
-            enemy_data[i] = {"hp": hp, "inc_dmg": inc_dmg, "init_vuln": init_vuln}
+            enemy_data[i] = {"hp": hp, "inc_dmg": inc_dmg, "init_vuln": init_vuln, "name": e.get("name", "")}
         else:
-            enemy_data[i] = {"hp": 999, "inc_dmg": 0, "init_vuln": 0}
+            enemy_data[i] = {"hp": 999, "inc_dmg": 0, "init_vuln": 0, "name": "Unknown"}
 
     alive_enemies = len(alive_targets)
     
+    p_strength = 0
+    p_dex = 0
+    p_initial_debuffs = {}
+    
+    if player_status:
+        for s in player_status:
+            s_id = str(s.get("id", "")).upper()
+            amt = int(s.get("amount", 0))
+            
+            if "STRENGTH" in s_id: 
+                p_strength += amt
+            elif "DEXTERITY" in s_id: 
+                p_dex += amt
+            else:
+                for db_key, db_val in STATUS_DB.items():
+                    if db_key in s_id:
+                        p_initial_debuffs[db_key] = db_val
+
     def dfs(e_left, cur_hand, seq):
         combos.append(seq + [{"action": "end_turn"}])
         
@@ -100,23 +120,46 @@ def generate_all_actions(energy, hand, enemies):
         total_dmg_dealt = 0
         total_vuln_applied = 0
         
+        active_debuffs = {k: v for k, v in p_initial_debuffs.items()}
+        
         for act in combo:
             if act["action"] == "play_card":
-                blk += act.get("blk", 0)
-                dmg = act.get("dmg", 0)
+                base_blk = act.get("blk", 0)
+                base_dmg = act.get("dmg", 0)
                 v = act.get("vuln", 0)
                 t = act.get("target", -1)
                 is_aoe = act.get("is_aoe", False)
                 
-                if dmg > 0 or v > 0:
+                if base_blk > 0:
+                    calc_blk = max(0, base_blk + p_dex)
+                    for db_val in active_debuffs.values():
+                        if db_val.get("type") == "blk_mult":
+                            calc_blk = int(calc_blk * db_val["mult"])
+                    blk += calc_blk
+
+                if base_dmg > 0:
+                    calc_dmg = max(0, base_dmg + p_strength)
+                    for db_val in active_debuffs.values():
+                        if db_val.get("type") == "dmg_mult":
+                            calc_dmg = int(calc_dmg * db_val["mult"])
+                else:
+                    calc_dmg = 0
+                
+                if calc_dmg > 0 or v > 0:
                     targets_to_hit = list(cur_hp.keys()) if is_aoe else ([t] if t in cur_hp else [])
                     
                     for tgt in targets_to_hit:
-                        if dmg > 0:
+                        if calc_dmg > 0:
                             multiplier = 1.5 if temp_vuln.get(tgt, 0) > 0 else 1.0
-                            actual_dmg = int(dmg * multiplier)
+                            actual_dmg = int(calc_dmg * multiplier)
                             cur_hp[tgt] -= actual_dmg
                             total_dmg_dealt += actual_dmg
+                            
+                            if cur_hp[tgt] <= 0:
+                                dead_name = enemy_data[tgt]["name"]
+                                keys_to_remove = [k for k, val in active_debuffs.items() if val.get("tied_to") == dead_name]
+                                for k in keys_to_remove:
+                                    del active_debuffs[k]
                         
                         if v > 0:
                             temp_vuln[tgt] += v
