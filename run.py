@@ -7,7 +7,6 @@ def main():
     combat_ai = STSCombatAI()
     choose_ai = STSChooseAI()
 
-    error_count = 0
 
     while True:
         raw_state = client.get_state()
@@ -31,7 +30,6 @@ def main():
 
         success = client.send_action(action_payload)
         if success:
-            error_count = 0
             act_type = action_payload.get("action")
             timeout_ticks = 0
             
@@ -64,14 +62,6 @@ def main():
                         break
                     if check_state.get("screen_type") != raw_state.get("screen_type"):
                         break
-        else:
-            error_count += 1
-            print(f"\n[Error] 액션 거부됨 (500 Error)")
-            print(f"문제가 된 페이로드: {action_payload}")
-            
-            if error_count >= 3:
-                print(f"동일 오류 {error_count}회 반복으로 스팸 방지를 위해 루프를 중단합니다.")
-                break
-
+        
 if __name__ == "__main__":
     main()
