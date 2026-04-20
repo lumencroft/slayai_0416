@@ -7,12 +7,8 @@ def main():
     combat_ai = STSCombatAI()
     choose_ai = STSChooseAI()
 
-
     while True:
         raw_state = client.get_state()
-        if raw_state is None:
-            continue
-
         state_type = raw_state.get("state_type", "")
         
         if state_type in ["monster", "elite", "boss"]:
