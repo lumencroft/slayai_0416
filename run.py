@@ -1,31 +1,77 @@
-import requests
-import time
+from sts_client import STSClient
 from sts_combat import STSCombatAI
 from sts_choose import STSChooseAI
 
-API_URL = "http://localhost:15526/api/v1/singleplayer"
-
 def main():
+    client = STSClient()
     combat_ai = STSCombatAI()
     choose_ai = STSChooseAI()
-    
-    while True:
-        response = requests.get(API_URL, params={"format": "json"}, timeout=3)
-        response.raise_for_status()
-        raw_state = response.json()
-        state_type = raw_state.get("state_type", "")
 
+    error_count = 0
+
+    while True:
+        raw_state = client.get_state()
+        if raw_state is None:
+            continue
+
+        state_type = raw_state.get("state_type", "")
+        
         if state_type in ["monster", "elite", "boss"]:
+            battle_info = raw_state.get("battle", {})
+            if battle_info.get("turn") != "player" or not battle_info.get("is_play_phase", False):
+                continue
             action_payload = combat_ai.get_action(raw_state)
         elif state_type in ["map", "event", "rest", "shop", "reward", "chest", "choice"]:
             action_payload = choose_ai.get_action(raw_state)
         else:
             action_payload = {"action": "proceed"}
 
-        if action_payload:
-            requests.post(API_URL, json=action_payload, timeout=3)
-        
-        time.sleep(0.1)
+        if not action_payload or action_payload.get("action") == "wait":
+            continue
+
+        success = client.send_action(action_payload)
+        if success:
+            error_count = 0
+            act_type = action_payload.get("action")
+            timeout_ticks = 0
+            
+            while True:
+                check_state = client.get_state()
+                if check_state is None:
+                    continue
+                    
+                timeout_ticks += 1
+                if timeout_ticks > 150:
+                    combat_ai.action_queue.clear()
+                    break
+                
+                if act_type == "play_card":
+                    old_hand = raw_state.get("player", {}).get("hand", [])
+                    new_hand = check_state.get("player", {}).get("hand", [])
+                    old_energy = raw_state.get("player", {}).get("energy", 0)
+                    new_energy = check_state.get("player", {}).get("energy", 0)
+                    
+                    if old_hand != new_hand or old_energy != new_energy:
+                        break
+                elif act_type == "end_turn":
+                    if not check_state.get("battle", {}).get("is_play_phase", False):
+                        break
+                elif act_type == "restart_combat":
+                    if check_state.get("state_type") in ["monster", "elite", "boss"] and check_state.get("battle", {}).get("is_play_phase", False):
+                        break
+                else:
+                    if check_state.get("state_type") != state_type:
+                        break
+                    if check_state.get("screen_type") != raw_state.get("screen_type"):
+                        break
+        else:
+            error_count += 1
+            print(f"\n[Error] 액션 거부됨 (500 Error)")
+            print(f"문제가 된 페이로드: {action_payload}")
+            
+            if error_count >= 3:
+                print(f"동일 오류 {error_count}회 반복으로 스팸 방지를 위해 루프를 중단합니다.")
+                break
 
 if __name__ == "__main__":
     main()

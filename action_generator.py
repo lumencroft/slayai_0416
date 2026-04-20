@@ -6,12 +6,25 @@ def generate_all_actions(energy, hand, enemies):
     enemy_count = len(enemies) if enemies else 1 
     
     enemy_data = {}
+    alive_targets = []
+    
     for i in range(enemy_count):
         if enemies and i < len(enemies):
             e = enemies[i]
             hp = e.get("hp", 999)
+            if hp <= 0:
+                enemy_data[i] = {"hp": 0, "inc_dmg": 0, "init_vuln": 0}
+                continue
+                
+            alive_targets.append(i)
             inc_dmg = 0
+            init_vuln = 0
             
+            for s in e.get("status", []):
+                if "VULNERABLE" in str(s.get("id", "")).upper():
+                    init_vuln = int(s.get("amount", 0))
+                    break
+
             for intent in e.get("intents", []):
                 if "Attack" in intent.get("type", ""):
                     label = str(intent.get("label", "0")).lower()
@@ -23,111 +36,147 @@ def generate_all_actions(energy, hand, enemies):
                         nums = re.findall(r'\d+', label)
                         if nums: inc_dmg += int(nums[0])
                         
-            enemy_data[i] = {"hp": hp, "inc_dmg": inc_dmg}
+            enemy_data[i] = {"hp": hp, "inc_dmg": inc_dmg, "init_vuln": init_vuln}
         else:
-            enemy_data[i] = {"hp": 999, "inc_dmg": 0}
+            enemy_data[i] = {"hp": 999, "inc_dmg": 0, "init_vuln": 0}
+
+    alive_enemies = len(alive_targets)
     
     def dfs(e_left, cur_hand, seq):
         combos.append(seq + [{"action": "end_turn"}])
-        seen = set()
         
+        seen = set()
         for i, c in enumerate(cur_hand):
+            if not c.get("can_play", True):
+                continue
+                
             name = c.get("name")
             raw_c = c.get("cost", CARD_DB.get(name, {}).get("cost", 0))
-            if f"{name}_{raw_c}" in seen: continue
-            seen.add(f"{name}_{raw_c}")
+            cost = int(raw_c) if str(raw_c).isdigit() else (e_left if str(raw_c).upper() == "X" else 0)
             
-            cost = int(raw_c) if str(raw_c).isdigit() else (e_left if str(raw_c).upper() == "X" else 999)
-            if cost <= e_left:
-                nxt_h = cur_hand[:i] + cur_hand[i+1:]
-                
-                has_target = CARD_DB.get(name, {}).get("has_target", False)
-                targets = range(enemy_count) if has_target else [None]
-                
-                for t in targets:
-                    act = {"action": "play_card", "card_index": c.get("index"), "card_name": name}
-                    if t is not None:
-                        act["target"] = t
-                    dfs(e_left - cost, nxt_h, seq + [act])
+            if cost > e_left:
+                continue
+
+            card_sig = f"{name}_{cost}"
+            if card_sig in seen: 
+                continue
+            seen.add(card_sig)
+            
+            nxt_h = cur_hand[:i] + cur_hand[i+1:]
+            
+            t_type = c.get("target_type", CARD_DB.get(name, {}).get("target_type", "None"))
+            if t_type in ["Enemy", "AnyEnemy"]:
+                targets = alive_targets
+            else:
+                targets = [None]
+            
+            card_damage = c.get("damage", CARD_DB.get(name, {}).get("damage", 0))
+            card_block = c.get("block", CARD_DB.get(name, {}).get("block", 0))
+            card_vuln = CARD_DB.get(name, {}).get("vulnerable", 0)
+            is_aoe = t_type in ["AllEnemies", "ALL_ENEMY"]
+            
+            for t in targets:
+                act = {
+                    "action": "play_card", 
+                    "card_index": c.get("index"), 
+                    "card_name": name, 
+                    "dmg": card_damage, 
+                    "blk": card_block, 
+                    "vuln": card_vuln,
+                    "is_aoe": is_aoe
+                }
+                if t is not None: 
+                    act["target"] = t
+                    
+                dfs(e_left - cost, nxt_h, seq + [act])
 
     dfs(energy, hand, [])
     
-    stats = {}
+    stats = []
     for combo in combos:
         blk = 0
-        dmg_dict = {}
-        vuln_dict = {}
-        temp_vuln = {}
+        cur_hp = {k: v["hp"] for k, v in enemy_data.items() if v["hp"] > 0}
+        temp_vuln = {k: v["init_vuln"] for k, v in enemy_data.items() if v["hp"] > 0}
+        total_dmg_dealt = 0
+        total_vuln_applied = 0
         
-        cur_hp = {k: v["hp"] for k, v in enemy_data.items()}
-
         for act in combo:
             if act["action"] == "play_card":
-                db = CARD_DB.get(act["card_name"], {})
-                t = act.get("target", -1) 
+                blk += act.get("blk", 0)
+                dmg = act.get("dmg", 0)
+                v = act.get("vuln", 0)
+                t = act.get("target", -1)
+                is_aoe = act.get("is_aoe", False)
                 
-                blk += db.get("block", 0)
-                
-                if db.get("damage", 0) > 0 and t != -1:
-                    multiplier = 1.5 if temp_vuln.get(t, 0) > 0 else 1.0
-                    actual_dmg = int(db.get("damage", 0) * multiplier)
-                    dmg_dict[t] = dmg_dict.get(t, 0) + actual_dmg
+                if dmg > 0 or v > 0:
+                    targets_to_hit = list(cur_hp.keys()) if is_aoe else ([t] if t in cur_hp else [])
                     
-                    if t in cur_hp:
-                        cur_hp[t] -= actual_dmg
-                    
-                v = db.get("vulnerable", 0)
-                if v > 0 and t != -1:
-                    temp_vuln[t] = temp_vuln.get(t, 0) + v
-                    vuln_dict[t] = vuln_dict.get(t, 0) + v
+                    for tgt in targets_to_hit:
+                        if dmg > 0:
+                            multiplier = 1.5 if temp_vuln.get(tgt, 0) > 0 else 1.0
+                            actual_dmg = int(dmg * multiplier)
+                            cur_hp[tgt] -= actual_dmg
+                            total_dmg_dealt += actual_dmg
+                        
+                        if v > 0:
+                            temp_vuln[tgt] += v
+                            total_vuln_applied += v
         
         surviving_inc_dmg = sum(enemy_data[i]["inc_dmg"] for i, hp in cur_hp.items() if hp > 0)
-        
         hp_loss = max(0, surviving_inc_dmg - blk)
+        kills = sum(1 for i, hp in cur_hp.items() if hp <= 0)
         
-        kills = tuple(sorted(i for i, hp in cur_hp.items() if hp <= 0))
-        
-        c_str = ' ➔ '.join([
-            c.get("card_name", "Unknown") + (f"(적{c['target']})" if c.get("target") is not None else "") 
-            if c["action"] == "play_card" else "턴 종료" 
-            for c in combo
-        ])
-        
-        st = (blk, hp_loss, kills, tuple(sorted(dmg_dict.items())), tuple(sorted(vuln_dict.items())))
-        if st not in stats:
-            stats[st] = {"combo": combo, "str": c_str, "b": blk, "loss": hp_loss, "kills": kills, "d": dmg_dict, "v": vuln_dict}
+        stats.append({
+            "combo": combo, 
+            "loss": hp_loss, 
+            "kills": kills, 
+            "dmg": total_dmg_dealt, 
+            "blk": blk,
+            "vuln": total_vuln_applied,
+            "incoming": surviving_inc_dmg,
+            "len": len(combo)
+        })
 
-    def is_dominated(current, other):
-        if other["loss"] > current["loss"]: return False
-        if other["b"] < current["b"]: return False
+    unique_stats = []
+    seen_sigs = set()
+    for s in stats:
+        cards_played = tuple(sorted([f"{act.get('card_name')}_{act.get('target', -1)}" for act in s["combo"] if act.get("action") == "play_card"]))
+        sig = (s["loss"], s["kills"], s["dmg"], s["blk"], s["vuln"], cards_played)
         
-        if not set(current["kills"]).issubset(set(other["kills"])): return False
-        
-        all_d_keys = set(other["d"].keys()) | set(current["d"].keys())
-        for k in all_d_keys:
-            if other["d"].get(k, 0) < current["d"].get(k, 0): return False
-            
-        all_v_keys = set(other["v"].keys()) | set(current["v"].keys())
-        for k in all_v_keys:
-            if other["v"].get(k, 0) < current["v"].get(k, 0): return False
-            
-        if other["loss"] < current["loss"]: return True
-        if other["b"] > current["b"]: return True
-        if set(other["kills"]) > set(current["kills"]): return True
-        for k in all_d_keys:
-            if other["d"].get(k, 0) > current["d"].get(k, 0): return True
-        for k in all_v_keys:
-            if other["v"].get(k, 0) > current["v"].get(k, 0): return True
-            
-        return False
+        if sig not in seen_sigs:
+            seen_sigs.add(sig)
+            unique_stats.append(s)
 
-    res = [c for i, c in enumerate(stats.values()) if not any(i != j and is_dominated(c, o) for j, o in enumerate(stats.values()))]
+    stats = unique_stats
 
-    def format_dict(d):
-        return ", ".join([f"적{k}:{v}" for k, v in d.items() if v > 0]) or "0"
-
-    # for i, r in enumerate(res):
-    #     kill_str = ", ".join([f"적{k}" for k in r['kills']]) if r['kills'] else "없음"
-    #     print(f"[{i + 1:02d}] 💔피해:{r['loss']:02d} | 💀처치:{kill_str} | 🛡️방어:{r['b']:02d} | ⚔️딜({format_dict(r['d'])}) | 💢취약({format_dict(r['v'])})  ||  {r['str']}")
-        
-    return [r["combo"] for r in res]
+    if alive_enemies > 0:
+        lethal_combos = [c for c in stats if c["kills"] >= alive_enemies]
+        if lethal_combos:
+            lethal_combos.sort(key=lambda x: (x["len"], -x["blk"]))
+            best_lethal = lethal_combos[0]
+            best_lethal["_is_lethal"] = True
+            return [best_lethal]
+    
+    stats.sort(key=lambda x: (
+        x["loss"],
+        -x["kills"],
+        -x["vuln"],
+        -x["dmg"],
+        -x["blk"],
+        x["len"]
+    ))
+    
+    pareto_frontier = []
+    for s in stats:
+        dominated = False
+        for f in pareto_frontier:
+            if (f["loss"] <= s["loss"] and 
+                f["kills"] >= s["kills"] and 
+                f["vuln"] >= s["vuln"] and
+                f["dmg"] >= s["dmg"]):
+                dominated = True
+                break
+        if not dominated:
+            pareto_frontier.append(s)
+    
+    return pareto_frontier
