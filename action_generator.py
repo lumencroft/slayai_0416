@@ -208,12 +208,15 @@ def evaluate_action_sequences(combos, player_status, enemies):
 
     return stats
 # ==========================================
-# Step 3: 하위 호환 콤보 제거 (파레토 최적화)
+# Step 3: 하위 호환 콤보 제거 (파레토 최적화 및 진짜 가지치기)
 # ==========================================
-# 🚨 [핵심] 인덱스가 꼬이지 않도록, best_loss 필터링을 제거하고 파레토 최적화만 수행합니다.
-def filter_optimal_actions(stats):
+# 🚨 [수정] 3개의 인자를 모두 정상적으로 받도록 복구했습니다.
+def filter_optimal_actions(stats, current_hp_loss=0, best_loss=float('inf')):
+    # 최고 기록보다 데미지가 높은 경로는 여기서 영구 삭제됩니다.
+    viable = [s for s in stats if current_hp_loss + s["loss"] <= best_loss]
+    
     unique_stats = {}
-    for s in stats:
+    for s in viable:
         sig = (s["loss"], s["kills"], s["dmg"], s["vuln"], s["final_hps"])
         if sig not in unique_stats or s["len"] < unique_stats[sig]["len"]:
             unique_stats[sig] = s
@@ -224,13 +227,11 @@ def filter_optimal_actions(stats):
     for s in filtered_stats:
         dominated = False
         for other in filtered_stats:
-            if s == other:
-                continue
-                
+            if s == other: continue
             hp_dominated = all(other_hp <= s_hp for other_hp, s_hp in zip(other["final_hps"], s["final_hps"]))
-            if (other["loss"] <= s["loss"] and other["vuln"] >= s["vuln"] and hp_dominated):
+            if other["loss"] <= s["loss"] and other["vuln"] >= s["vuln"] and hp_dominated:
                 hp_strictly_better = any(other_hp < s_hp for other_hp, s_hp in zip(other["final_hps"], s["final_hps"]))
-                if (other["loss"] < s["loss"] or other["vuln"] > s["vuln"] or hp_strictly_better or other["len"] < s["len"]): 
+                if other["loss"] < s["loss"] or other["vuln"] > s["vuln"] or hp_strictly_better or other["len"] < s["len"]: 
                     dominated = True
                     break
         if not dominated:
@@ -241,25 +242,26 @@ def filter_optimal_actions(stats):
 
 
 # ==========================================
-# Main: 전체 과정 실행 및 결과 출력
+# Main: 전체 과정 실행 및 결과 출력 (1줄 요약)
 # ==========================================
-def generate_all_actions(energy, hand, enemies, player_status=None):
+# 🚨 [수정] sts_combat.py가 넘겨주는 6개의 인자를 모두 받도록 복구했습니다.
+def generate_all_actions(energy, hand, enemies, player_status=None, current_hp_loss=0, best_loss=float('inf')):
     raw_combos = generate_action_sequences(energy, hand, enemies, player_status)
     evaluated_stats = evaluate_action_sequences(raw_combos, player_status, enemies)
-    optimal_stats = filter_optimal_actions(evaluated_stats)
     
-    print("\n" + "="*80)
-    print(f"📊 [AI 턴 최종 시뮬레이션 성적표] (총 {len(evaluated_stats)}개 중 정예 {len(optimal_stats)}개 생존)")
-    print("="*80)
+    # 🚨 인자 3개 정상적으로 전달
+    optimal_stats = filter_optimal_actions(evaluated_stats, current_hp_loss, best_loss)
     
-    for i, s in enumerate(optimal_stats):
-        combo_str = " -> ".join([
-            f"{act.get('card_name')}(타겟:{act.get('target', '없음')})" if act.get('action') == 'play_card' else "턴 종료" 
-            for act in s['combo']
-        ])
-        rank_mark = "🏆 [최우수]" if i == 0 else f"[{i+1}번 후보]"
-        print(f"{rank_mark} 🩸예상피해: {s['loss']:2d} | 💀킬: {s['kills']} | ⚔️딜: {s['dmg']:2d} | 🛡️방어: {s['blk']:2d} | 🎯취약: {s['vuln']}")
-        print(f"   ▶ 경로: {combo_str}")
-        print("-" * 80)
-        
+    if not optimal_stats:
+        print(f"   ✂️ [전원 가지치기] 최고기록({best_loss}) 초과로 모든 평행세계 폐기")
+    else:
+        print(f"\n📊 [턴 시뮬레이션 결과] 총 {len(evaluated_stats)}개 중 정예 {len(optimal_stats)}개 생존")
+        for i, s in enumerate(optimal_stats):
+            combo_str = " -> ".join([
+                f"{act.get('card_name')}(T:{act.get('target', '?')})" if act.get('action') == 'play_card' else "턴 종료" 
+                for act in s['combo']
+            ])
+            mark = "🏆" if i == 0 else f"[{i+1}]"
+            print(f"  {mark} 🩸피해:{s['loss']:2d} | 💀킬:{s['kills']} | ⚔️딜:{s['dmg']:2d} | 🛡️방어:{s['blk']:2d} | 🎯취약:{s['vuln']} => {combo_str}")
+            
     return optimal_stats

@@ -16,36 +16,36 @@ class StateObserver:
 
     def compare_and_print_diff(self, before, after, elapsed_ms, ticks):
         """이전 상태와 현재 상태를 비교하고 걸린 시간을 콘솔에 전문적으로 출력합니다."""
-        print("\n" + "="*60)
-        print(f"📊 [상태 변화 디버그 리포트] ⏱️ {elapsed_ms:.2f}ms 소요 (API {ticks}회 호출)")
-        print("-" * 60)
+        # print("\n" + "="*60)
+        # print(f"📊 [상태 변화 디버그 리포트] ⏱️ {elapsed_ms:.2f}ms 소요 (API {ticks}회 호출)")
+        # print("-" * 60)
         
         # 1. 플레이어 상태 변화 체크 (HP, 에너지, 방어도)
         b_p = before.get("player", {})
         a_p = after.get("player", {})
         
-        if b_p.get("energy") != a_p.get("energy"):
-            print(f"⚡ 에너지: {b_p.get('energy')} -> {a_p.get('energy')}")
-        if b_p.get("hp") != a_p.get("hp"):
-            print(f"❤️ 플레이어 HP: {b_p.get('hp')} -> {a_p.get('hp')}")
-        if b_p.get("block") != a_p.get("block"):
-            print(f"🛡️ 플레이어 방어도: {b_p.get('block')} -> {a_p.get('block')}")
+        # if b_p.get("energy") != a_p.get("energy"):
+        #     print(f"⚡ 에너지: {b_p.get('energy')} -> {a_p.get('energy')}")
+        # if b_p.get("hp") != a_p.get("hp"):
+        #     print(f"❤️ 플레이어 HP: {b_p.get('hp')} -> {a_p.get('hp')}")
+        # if b_p.get("block") != a_p.get("block"):
+        #     print(f"🛡️ 플레이어 방어도: {b_p.get('block')} -> {a_p.get('block')}")
 
         # 2. 패(Hand) 변화 체크 및 인덱스 확인
-        b_hand = b_p.get("hand", [])
-        a_hand = a_p.get("hand", [])
-        if len(b_hand) != len(a_hand) or b_hand != a_hand:
-            b_names = [c.get("name") for c in b_hand]
-            a_names = [c.get("name") for c in a_hand]
-            print(f"🃏 패 변화: {len(b_hand)}장 -> {len(a_hand)}장")
-            print(f"   [이전]: {b_names}")
-            print(f"   [현재]: {a_names}")
+        # b_hand = b_p.get("hand", [])
+        # a_hand = a_p.get("hand", [])
+        # if len(b_hand) != len(a_hand) or b_hand != a_hand:
+        #     b_names = [c.get("name") for c in b_hand]
+        #     a_names = [c.get("name") for c in a_hand]
+            # print(f"🃏 패 변화: {len(b_hand)}장 -> {len(a_hand)}장")
+            # print(f"   [이전]: {b_names}")
+            # print(f"   [현재]: {a_names}")
 
         # 3. 적(Enemies) 상태 변화 완벽 추적 (HP, 죽음, 인덱스 밀림, 의도 사라짐)
         b_enemies = before.get("battle", {}).get("enemies", [])
         a_enemies = after.get("battle", {}).get("enemies", [])
         
-        print(f"👾 적 상태 디테일 (이전 {len(b_enemies)}마리 -> 현재 {len(a_enemies)}마리):")
+        # print(f"👾 적 상태 디테일 (이전 {len(b_enemies)}마리 -> 현재 {len(a_enemies)}마리):")
         
         # 죽거나 밀린 몬스터를 추적하기 위한 로직
         a_matched = [] # 이미 매칭된 현재 적의 인덱스
@@ -62,20 +62,20 @@ class StateObserver:
                     a_matched.append(a_idx)
                     break
             
-            if found_a_idx != -1:
+            # if found_a_idx != -1:
                 # 몬스터가 살아있음! 변화점 체크
-                a_e = a_enemies[found_a_idx]
-                if b_hp != a_e.get("hp"):
-                    print(f"   🩸 HP 변화 [{name}]: {b_hp} -> {a_e.get('hp')}")
-                if b_e.get("block", 0) != a_e.get("block", 0):
-                    print(f"   🛡️ 방어도 변화 [{name}]: {b_e.get('block', 0)} -> {a_e.get('block', 0)}")
-                if b_idx != found_a_idx:
-                    print(f"   ↔️ 인덱스 당겨짐 [{name}]: 기존 {b_idx}번 타겟 -> 현재 {found_a_idx}번 타겟으로 이동!")
-            else:
+                # a_e = a_enemies[found_a_idx]
+                # if b_hp != a_e.get("hp"):
+                    # print(f"   🩸 HP 변화 [{name}]: {b_hp} -> {a_e.get('hp')}")
+                # if b_e.get("block", 0) != a_e.get("block", 0):
+                    # print(f"   🛡️ 방어도 변화 [{name}]: {b_e.get('block', 0)} -> {a_e.get('block', 0)}")
+                # if b_idx != found_a_idx:
+                    # print(f"   ↔️ 인덱스 당겨짐 [{name}]: 기존 {b_idx}번 타겟 -> 현재 {found_a_idx}번 타겟으로 이동!")
+            # else:
                 # 현재 배열에 없음 = 사망하여 소멸함
-                print(f"   💀 사망 및 배열 소멸: {name} (이전 HP: {b_hp}, 기존 {b_idx}번 타겟)")
-                print(f"   ❌ 의도(Intent) 영구 제거됨: {name}")
-                
+                # print(f"   💀 사망 및 배열 소멸: {name} (이전 HP: {b_hp}, 기존 {b_idx}번 타겟)")
+                # print(f"   ❌ 의도(Intent) 영구 제거됨: {name}")
+                # pass
         print("=" * 60 + "\n")
 
 
